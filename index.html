@@ -81,8 +81,9 @@ const DATA={"type": "FeatureCollection", "features": [{"type": "Feature", "geome
 // BACKEND: 'ntfy' = free public relay, no account (prototype; anyone can post, kept 12h)
 //          'supabase' = real database (fill SUPABASE_URL / SUPABASE_ANON_KEY, run schema.sql)
 //          'local' = this browser only
-const CONFIG={BACKEND:'ntfy',NTFY_TOPIC:'waycross-crossings-l6085497',
-  SUPABASE_URL:'https://YOUR-PROJECT.supabase.co',SUPABASE_ANON_KEY:'YOUR-ANON-KEY'};
+// SAVE_SUPABASE: also save every report to Supabase (history) and read it back, alongside ntfy live sharing.
+const CONFIG={BACKEND:'ntfy',SAVE_SUPABASE:true,NTFY_TOPIC:'waycross-crossings-l6085497',
+  SUPABASE_URL:'https://xbydxgafitxyanyunsst.supabase.co',SUPABASE_ANON_KEY:'sb_publishable_Z0ebOY7LY9vYzBg8hcebsw_efR3T_np'};
 const KEY='crossingReports';
 let shared=JSON.parse(localStorage.getItem(KEY)||'{}');
 const rep=()=>shared;
@@ -97,21 +98,21 @@ async function pull(){try{
  if(CONFIG.BACKEND==='ntfy'){const r=await fetch(`https://ntfy.sh/${CONFIG.NTFY_TOPIC}/json?poll=1&since=2h`);
   (await r.text()).split('\n').filter(Boolean).forEach(l=>{const m=JSON.parse(l);if(m.event!=='message')return;
    try{const d=JSON.parse(m.message);if(d.id&&/^(blocked|clear)$/.test(d.s)){apply(d.id,d.s,m.time*1000);note(m.id,d.id,d.s,m.time*1000,d.c)}}catch(e){}})}
- else if(CONFIG.BACKEND==='supabase'){const since=new Date(Date.now()-2*3600e3).toISOString();
-  const r=await fetch(`${CONFIG.SUPABASE_URL}/rest/v1/reports?select=crossing_id,status,created_at&created_at=gte.${since}&order=created_at.asc`,
+ if(CONFIG.BACKEND==='supabase'||CONFIG.SAVE_SUPABASE){try{const since=new Date(Date.now()-2*3600e3).toISOString();
+  const r=await fetch(`${CONFIG.SUPABASE_URL}/rest/v1/reports?select=crossing_id,status,created_at,client_id&created_at=gte.${since}&order=created_at.asc`,
    {headers:{apikey:CONFIG.SUPABASE_ANON_KEY,Authorization:'Bearer '+CONFIG.SUPABASE_ANON_KEY}});
-  (await r.json()).forEach(x=>{const t=Date.parse(x.created_at);apply(x.crossing_id,x.status,t);note(x.crossing_id+'@'+x.created_at,x.crossing_id,x.status,t)})}
+  if(!r.ok)throw new Error('HTTP '+r.status);(await r.json()).forEach(x=>{const t=Date.parse(x.created_at);apply(x.crossing_id,x.status,t);note('sb:'+x.crossing_id+'@'+x.created_at,x.crossing_id,x.status,t,x.client_id)})}catch(e){console.warn('supabase read failed',e)}}
  if(seen.length>500)seen=seen.slice(-500);localStorage.setItem('tdSeen',JSON.stringify(seen));
  localStorage.setItem(KEY,JSON.stringify(shared));if(typeof markers!=='undefined')Object.keys(markers).forEach(refresh);
  // Only alert if that report is still the latest one for the crossing (e.g. not already cleared).
  fresh.forEach(f=>{const cur=shared[f.id];if(cur&&cur.s===f.s&&cur.t===f.t)maybeAlert(f.id,f.s)});
  if(document.getElementById('minePanel').classList.contains('open'))renderMine();
 }catch(e){console.warn('pull failed',e)}}
-async function push(id,s){try{
- if(CONFIG.BACKEND==='ntfy')await fetch(`https://ntfy.sh/${CONFIG.NTFY_TOPIC}`,{method:'POST',body:JSON.stringify({id,s,c:CLIENT})});
- else if(CONFIG.BACKEND==='supabase')await fetch(`${CONFIG.SUPABASE_URL}/rest/v1/reports`,{method:'POST',
+async function push(id,s){
+ if(CONFIG.BACKEND==='supabase'||CONFIG.SAVE_SUPABASE)fetch(`${CONFIG.SUPABASE_URL}/rest/v1/reports`,{method:'POST',
   headers:{apikey:CONFIG.SUPABASE_ANON_KEY,Authorization:'Bearer '+CONFIG.SUPABASE_ANON_KEY,'Content-Type':'application/json',Prefer:'return=minimal'},
-  body:JSON.stringify({crossing_id:id,status:s})});
+  body:JSON.stringify({crossing_id:id,status:s,source:'user',client_id:String(CLIENT).slice(0,64)})}).catch(e=>console.warn('supabase save failed',e));
+ try{if(CONFIG.BACKEND==='ntfy')await fetch(`https://ntfy.sh/${CONFIG.NTFY_TOPIC}`,{method:'POST',body:JSON.stringify({id,s,c:CLIENT})});
 }catch(e){alert('Saved on this phone, but could not share: '+e.message)}}
 
 // ===== Personal settings (localStorage only, no account) =====
